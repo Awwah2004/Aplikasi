@@ -1,0 +1,6 @@
+{
+  "name": "Sistem Kas Administrator",
+  "description": "Sistem Pencatatan Keuangan untuk HAM LAW AND JUSTICE (Advokat dan Kantor Hukum) dengan analisis AI Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
