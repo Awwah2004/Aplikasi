@@ -33,7 +33,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Sync configuration states
     var sheetsUrlInput by mutableStateOf("")
     var sheetsSyncEnabled by mutableStateOf(false)
-    var showSyncSettingsDialog by mutableStateOf(false)
 
     // --- Authentication State ---
     var isLoggedIn by mutableStateOf(false)

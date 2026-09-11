@@ -32,7 +32,7 @@ object SyncManager {
     // --- SharedPreferences Helpers ---
     fun getSheetsUrl(context: Context): String {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getString("sheets_url", "") ?: ""
+            .getString("sheets_url", "https://script.google.com/macros/s/AKfycbw3xIJVB_rmR2qdE_0SXve0I9BiOyro0YwAHSmXu1pETYnZ4TpTn2qlmENvqgczsf3EmA/exec") ?: "https://script.google.com/macros/s/AKfycbw3xIJVB_rmR2qdE_0SXve0I9BiOyro0YwAHSmXu1pETYnZ4TpTn2qlmENvqgczsf3EmA/exec"
     }
 
     fun setSheetsUrl(context: Context, url: String) {
@@ -44,7 +44,7 @@ object SyncManager {
 
     fun isSheetsSyncEnabled(context: Context): Boolean {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean("sheets_sync", false)
+            .getBoolean("sheets_sync", true)
     }
 
     fun setSheetsSyncEnabled(context: Context, enabled: Boolean) {
@@ -61,11 +61,13 @@ object SyncManager {
         if (url.isEmpty()) return@withContext false
 
         val payload = mapOf(
+            "id" to transaction.id,
             "tanggal" to transaction.tanggal,
             "tipe" to transaction.tipe,
             "milik" to transaction.milik,
             "jumlah" to transaction.jumlah,
-            "keterangan" to transaction.keterangan
+            "keterangan" to transaction.keterangan,
+            "timestamp" to transaction.timestamp
         )
 
         val requestMap = mapOf(
@@ -176,9 +178,15 @@ object SyncManager {
                                         val timestampStr = row["Timestamp"] as? String
                                         val timestamp = if (timestampStr != null) {
                                             try {
-                                                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.getDefault()).parse(timestampStr)?.time ?: System.currentTimeMillis()
+                                                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.getDefault()).parse(timestampStr)?.time 
+                                                    ?: System.currentTimeMillis()
                                             } catch (e: Exception) {
-                                                System.currentTimeMillis()
+                                                try {
+                                                    java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", java.util.Locale.getDefault()).parse(timestampStr)?.time 
+                                                        ?: System.currentTimeMillis()
+                                                } catch (e2: Exception) {
+                                                    System.currentTimeMillis()
+                                                }
                                             }
                                         } else {
                                             System.currentTimeMillis()
