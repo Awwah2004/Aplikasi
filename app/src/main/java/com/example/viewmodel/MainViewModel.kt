@@ -1,6 +1,7 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -24,9 +25,72 @@ import java.util.UUID
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: TransactionRepository
 
+    // --- Sync States ---
+    var isSyncing by mutableStateOf(false)
+        private set
+    var syncResult by mutableStateOf<String?>(null)
+
+    // Sync configuration states
+    var sheetsUrlInput by mutableStateOf("")
+    var sheetsSyncEnabled by mutableStateOf(false)
+    var showSyncSettingsDialog by mutableStateOf(false)
+
+    // --- Authentication State ---
+    var isLoggedIn by mutableStateOf(false)
+        private set
+    var usernameInput by mutableStateOf("")
+    var passwordInput by mutableStateOf("")
+    var isProcessingLogin by mutableStateOf(false)
+    var loginError by mutableStateOf<String?>(null)
+
+    // --- Google Auth State ---
+    var currentUserProfile by mutableStateOf<com.example.auth.UserProfile?>(null)
+    var googleWebClientIdInput by mutableStateOf("")
+    var showGoogleConfigDialog by mutableStateOf(false)
+
     init {
         val database = AppDatabase.getDatabase(application)
         repository = TransactionRepository(database.transactionDao())
+
+        // Load initial sync configurations from SyncManager SharedPreferences
+        sheetsUrlInput = com.example.sync.SyncManager.getSheetsUrl(application)
+        sheetsSyncEnabled = com.example.sync.SyncManager.isSheetsSyncEnabled(application)
+
+        // Restore Google user session if previously logged in
+        val savedUser = com.example.auth.GoogleAuthManager.getSavedUser(application)
+        if (savedUser != null) {
+            currentUserProfile = savedUser
+            isLoggedIn = true
+        }
+        googleWebClientIdInput = com.example.auth.GoogleAuthManager.getWebClientId(application)
+    }
+
+    fun saveSyncSettings() {
+        val app = getApplication<Application>()
+        com.example.sync.SyncManager.setSheetsUrl(app, sheetsUrlInput)
+        com.example.sync.SyncManager.setSheetsSyncEnabled(app, sheetsSyncEnabled)
+        showToast("Pengaturan sinkronisasi berhasil disimpan")
+    }
+
+    fun startSync() {
+        isSyncing = true
+        syncResult = null
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            // Ensure settings are saved first
+            com.example.sync.SyncManager.setSheetsUrl(app, sheetsUrlInput)
+            com.example.sync.SyncManager.setSheetsSyncEnabled(app, sheetsSyncEnabled)
+
+            val res = com.example.sync.SyncManager.syncNow(app)
+            isSyncing = false
+            if (res.success) {
+                showToast("Sinkronisasi Berhasil! Sheets: ${res.sheetsSyncedCount}")
+                syncResult = "Berhasil disinkronisasi"
+            } else {
+                showToast("Gagal menyelaraskan: ${res.error}", isError = true)
+                syncResult = "Gagal: ${res.error}"
+            }
+        }
     }
 
     // --- Transactions List Flow ---
@@ -36,15 +100,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
-
-    // --- Authentication State ---
-    var isLoggedIn by mutableStateOf(false)
-        private set
-
-    var usernameInput by mutableStateOf("")
-    var passwordInput by mutableStateOf("")
-    var isProcessingLogin by mutableStateOf(false)
-    var loginError by mutableStateOf<String?>(null)
 
     fun login() {
         if (usernameInput.isBlank() || passwordInput.isBlank()) {
@@ -69,11 +124,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun signInWithGoogle(context: Context) {
+        val clientId = googleWebClientIdInput.ifBlank {
+            com.example.auth.GoogleAuthManager.getWebClientId(context)
+        }
+
+        if (clientId.isBlank() || clientId == "YOUR_GOOGLE_WEB_CLIENT_ID") {
+            showGoogleConfigDialog = true
+            return
+        }
+
+        isProcessingLogin = true
+        loginError = null
+
+        viewModelScope.launch {
+            val result = com.example.auth.GoogleAuthManager.signInWithGoogle(context, clientId)
+            isProcessingLogin = false
+            if (result.isSuccess) {
+                currentUserProfile = result.getOrNull()
+                isLoggedIn = true
+                loginError = null
+                showToast("Selamat datang, ${currentUserProfile?.displayName ?: "Pengguna Google"}!")
+            } else {
+                val errorMsg = result.exceptionOrNull()?.message ?: "Gagal login dengan Google"
+                loginError = errorMsg
+                showToast(errorMsg, isError = true)
+            }
+        }
+    }
+
+    fun saveGoogleWebClientId() {
+        val app = getApplication<Application>()
+        com.example.auth.GoogleAuthManager.saveWebClientId(app, googleWebClientIdInput)
+        showToast("Web Client ID berhasil disimpan.")
+    }
+
     fun logout() {
         isLoggedIn = false
         usernameInput = ""
         passwordInput = ""
         loginError = null
+        currentUserProfile = null
+        com.example.auth.GoogleAuthManager.clearUser(getApplication())
+        showToast("Anda telah keluar.")
     }
 
     // --- Transaction Form Inputs ---
@@ -128,6 +221,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.insert(newTx)
             showToast("Transaksi berhasil ditambahkan.")
             resetForm()
+
+            // Trigger background sync
+            val app = getApplication<Application>()
+            if (com.example.sync.SyncManager.isSheetsSyncEnabled(app)) {
+                launch { com.example.sync.SyncManager.uploadToSheets(app, newTx) }
+            }
         }
     }
 
@@ -136,6 +235,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.delete(id)
             showToast("Transaksi berhasil dihapus.")
             showDeleteConfirmationId = null
+
+            // Trigger background delete
+            val app = getApplication<Application>()
+            if (com.example.sync.SyncManager.isSheetsSyncEnabled(app)) {
+                launch { com.example.sync.SyncManager.deleteFromSheets(app, id) }
+            }
         }
     }
 
